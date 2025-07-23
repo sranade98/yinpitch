@@ -17,20 +17,24 @@
 //==============================================================================
 FreqSpectrum::FreqSpectrum()
 {
-    // In your constructor, you should add any child components, and
-    // initialise any special settings that your component needs.
+
+    smoothedX.reset(60.0, 0.15); 
+
 
 }
 
 FreqSpectrum::~FreqSpectrum()
 {
 }
+
+
+
 void FreqSpectrum::drawFrame (juce::Graphics& g)
 {
     auto width  = (float) getLocalBounds().getWidth();
     auto height = (float) getLocalBounds().getHeight();
 
-                for (int i = 1; i < scopeSize; ++i)
+    for (int i = 1; i < scopeSize; ++i)
         {
             g.drawLine({
                 juce::jmap ((float)(i - 1), 0.0f, (float)(scopeSize - 1), 0.0f, width),
@@ -39,45 +43,76 @@ void FreqSpectrum::drawFrame (juce::Graphics& g)
                 juce::jmap (scopeData[i], 0.0f, 1.0f, height, 0.0f)
             });
         }
-    
-    if (fundamentalFreq > 0.0f)
-    {
-        const float nyquist = 22050.0f; // or currentSampleRate * 0.5
-        float minFreq = 50.0f;
-        float maxFreq = 500.0f;
-        float x = juce::jmap(juce::jlimit(minFreq, maxFreq, fundamentalFreq), minFreq, maxFreq, 0.0f, width);
-
-        g.setColour(juce::Colours::red);
-        g.drawLine(x, 0.0f, x, height, 2.0f);
-    }
-
         
+}
+
+void FreqSpectrum::setIdealFrequency(float freq, float min, float max)
+{
+    idealFreq = freq;
+    displayMinFreq = min;
+    displayMaxFreq = max;
 }
 
 
 void FreqSpectrum::paint (juce::Graphics& g)
 {
-    /* This demo code just fills the component's background and
-       draws some placeholder text to get you started.
-
-       You should replace everything in this method with your own
-       drawing code..
-    */
-
     g.fillAll (juce::Colours::black);
-    g.setColour (juce::Colours::whitesmoke);
-    drawFrame (g);
     
+
+    
+    g.setColour (juce::Colours::orange);
+    //drawFrame (g);
+
+    auto width = (float) getLocalBounds().getWidth();
+    auto height = (float) getLocalBounds().getHeight();
+
     if (fundamentalFreq > 0.0f)
     {
-        auto width = (float) getLocalBounds().getWidth();
-        const float nyquist = 22050.0f;
-        float x = juce::jmap(fundamentalFreq, 0.0f, nyquist, 0.0f, width);
+        float targetX = juce::jmap(
+            juce::jlimit(displayMinFreq, displayMaxFreq, fundamentalFreq),
+            displayMinFreq, displayMaxFreq, 0.0f, (float)width);
 
-        juce::String label = juce::String(fundamentalFreq, 1) + " Hz";
+        smoothedX.setTargetValue(targetX);
+    }
+
+
+    float x = smoothedX.getNextValue();
+
+
+    trail.push_back({ x, 1.0f }); // New head of the trail
+
+
+    for (auto& p : trail)
+        p.alpha *= 0.80f; 
+
+    while (!trail.empty() && trail.front().alpha < 0.02f)
+        trail.pop_front();
+
+
+    for (const auto& p : trail)
+    {
+        juce::Path path;
+        path.startNewSubPath(p.x, 0.0f);
+        path.lineTo(p.x, height);
+
+        g.setColour(juce::Colours::orange.withAlpha(p.alpha));
+        g.strokePath(path, juce::PathStrokeType(2.0f));
+    }
+
+
+
+    if (idealFreq > 0.0f)
+    {
+        float idealX = juce::jmap(
+        juce::jlimit(displayMinFreq, displayMaxFreq, idealFreq),
+        displayMinFreq, displayMaxFreq, 0.0f, width);
+
+        g.setColour(juce::Colours::orangered);
+        g.drawLine(idealX, 0.0f, idealX, height, 3.0f);
+
+        juce::String label = "Target: " + juce::String(idealFreq, 1) + " Hz";
         g.setFont(15.0f);
-        g.setColour(juce::Colours::red);
-        g.drawText(label, x + 5.0f, 10.0f, 100.0f, 20.0f, juce::Justification::left);
+        g.drawText(label, idealX + 5.0f, 30.0f, 150.0f, 20.0f, juce::Justification::left);
     }
 }
 
@@ -91,7 +126,6 @@ void FreqSpectrum::updateSpectrumData (const float* newData, size_t size)
 
 void FreqSpectrum::resized()
 {
-    // This method is where you should set the bounds of any child
-    // components that your component contains..
+  
 
 }
