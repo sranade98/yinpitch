@@ -2,14 +2,29 @@
 
 #include <JuceHeader.h>
 #include "FreqSpectrum.h"
-#include "StringLamps.h"
 #include "FreqSpectrum.h"
+#include "StringLabelManager.h"
+
 
 //==============================================================================
 /*
     This component lives inside our window, and this is where you should put all
     your controls and content.
 */
+// Define LookAndFeel BEFORE MainComponent
+class CustomComboBoxLookAndFeel : public juce::LookAndFeel_V4
+{
+public:
+    juce::Font getComboBoxFont(juce::ComboBox&) override
+    {
+        return juce::FontOptions("Copperplate", 24.0f, juce::Font::plain);
+    }
+};
+
+
+
+
+
 class MainComponent  : public juce::AudioAppComponent,
                        private juce::Timer
 {
@@ -17,8 +32,10 @@ class MainComponent  : public juce::AudioAppComponent,
     juce::Label chooseTuning;
     juce::ComboBox tuningSelector;
     juce::ComboBox styleMenu;
-    juce::Label textLabel {{}, "Select tuning"};
+    juce::Label textLabel {{}, "Selec t tuning"};
     juce::FontOptions textFont {20.0f};
+ 
+
     
 
     
@@ -64,12 +81,10 @@ private:
     FreqSpectrum fspec;
     
     
-    StringLamp stringlamp1;
-    StringLamp stringlamp2;
-    StringLamp stringlamp3;
-    StringLamp stringlamp4;
-    StringLamp stringlamp5;
-    StringLamp stringlamp6;
+
+
+    
+    juce::GroupComponent border;
     
     juce::dsp::FFT forwardFFT;
     juce::dsp::WindowingFunction<float> window;
@@ -98,11 +113,29 @@ private:
     int tau_min = 0;
     int tau_max = 0;
     
+    juce::String kanjiYin;
+    juce::Label kanjiLabel;
+
+    juce::String finalNoteDisplay;
+    //juce::String notesDisplay;
     
+    const float kBaseWidth = 1500.0f;
+    const float kBaseHeight = 2000.0f;
+
+    juce::int64 lastPitchUpdateTime = 0;
+
+    StringLabelManager stringLabelManager;
     
-    
-    
+    juce::Image leftFish;
+    juce::Image rightFish;
+    juce::Image sonne;
+    juce::ImageComponent glowingSonne;
+    juce::GlowEffect sonneGlow;
+    CustomComboBoxLookAndFeel comboBoxLookAndFeel;
+
 
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
+
+
