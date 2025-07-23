@@ -1,28 +1,50 @@
 #include "MainComponent.h"
 #include "FreqSpectrum.h"
-#include "StringLamps.h"
 #include <limits>
-#include <list>
+#include "StringLabelManager.h"
+
+
 
 
 //==============================================================================
 MainComponent::MainComponent() : forwardFFT(fftOrder), window(fftSize, juce::dsp::WindowingFunction<float>::hann)
 {
-    setAudioChannels (2, 0); // Set up audio channels for 2 inputs and 0 outputs
-    startTimerHz (30); // Timer callback would be called every 30 ms
+    setAudioChannels (2, 0); 
+    startTimerHz (30);
+    setSize (1500, 2000);
     
-    // Make sure you set the size of the component after
-    // you add any child components.
-    setSize (800, 600);
-    addAndMakeVisible(chooseTuning);
-    chooseTuning.setText("Select tuning", juce::dontSendNotification);
-    chooseTuning.setFont(textFont);
-    tuningSelector.addItem(" --------------- ", 1);
+    // 1. Load and setup the sun image
+    sonne = juce::ImageCache::getFromMemory(BinaryData::Sonne_png, BinaryData::Sonne_pngSize);
+    glowingSonne.setImage(sonne);
+    sonneGlow.setGlowProperties(50.0f, juce::Colours::orange.withAlpha(0.5f)); // Spread, Opacity
+    glowingSonne.setComponentEffect(&sonneGlow);
+    addAndMakeVisible(glowingSonne);
+    // NEW: Create kanji label
+    kanjiLabel.setText("Yin Pitch", juce::dontSendNotification);
+    kanjiLabel.setFont(juce::FontOptions("Pauls Kanji Font", 150.0f, juce::Font::plain));
+    kanjiLabel.setJustificationType(juce::Justification::centredTop);
+    kanjiLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
+    kanjiLabel.setInterceptsMouseClicks(false, false); 
+
+    addAndMakeVisible(kanjiLabel);
+    kanjiLabel.toFront(false); 
+
+    
+
+    chooseTuning.setText("-", juce::dontSendNotification);
+    
+    tuningSelector.addItem("Select your tuning ", 1);
+    
     tuningSelector.addItem("Standard Tuning (E A D G B E)", 2);
     tuningSelector.addItem("Drop D Tuning (D A D G B E)", 3);
     tuningSelector.addItem("Open D Tuning (D A D F# A D)", 4);
     tuningSelector.setSelectedId(1);
+    tuningSelector.setLookAndFeel(&comboBoxLookAndFeel);
+    chooseTuning.setFont(juce::FontOptions("Copperplate", 100.0f, juce::Font::plain));
+    addAndMakeVisible(chooseTuning);
     
+    border.setLookAndFeel(&comboBoxLookAndFeel);
+       
     
     tuningSelector.onChange = [this]()
     {
@@ -35,33 +57,55 @@ MainComponent::MainComponent() : forwardFFT(fftOrder), window(fftSize, juce::dsp
             case 4: selectedTuningArray = openDTuning; break;
             default: selectedTuningArray = nullptr; break;
         }
+
+        juce::StringArray stringNotes;
+
+        switch (selectedTuning)
+        {
+            case 2: stringNotes = { "E", "A", "D", "G", "B", "E" }; break;
+            case 3: stringNotes = { "D", "A", "D", "G", "B", "E" }; break;
+            case 4: stringNotes = { "D", "A", "D", "F#", "A", "D" }; break;
+            default: stringNotes = { "", "", "", "", "", "" }; break;
+        }
+
+        stringLabelManager.updateTuningLabels(stringNotes);
+
+        repaint();
     };
+
+
     selectedTuningArray = nullptr;
   
     addAndMakeVisible(tuningSelector);
+    tuningSelector.setColour(juce::ComboBox::backgroundColourId, juce::Colours::black);
+    tuningSelector.setColour(juce::ComboBox::textColourId, juce::Colours::orange);
+    tuningSelector.setColour(juce::ComboBox::arrowColourId, juce::Colours::orange);
+    tuningSelector.setColour(juce::ComboBox::outlineColourId, juce::Colours::orange);
+
+
     addAndMakeVisible(fspec);
     
-    // First turn all lamps OFF
-    stringlamp1.setLampState(false);
-    stringlamp2.setLampState(false);
-    stringlamp3.setLampState(false);
-    stringlamp4.setLampState(false);
-    stringlamp5.setLampState(false);
-    stringlamp6.setLampState(false);
-    addAndMakeVisible(stringlamp1);
-    addAndMakeVisible(stringlamp2);
-    addAndMakeVisible(stringlamp3);
-    addAndMakeVisible(stringlamp4);
-    addAndMakeVisible(stringlamp5);
-    addAndMakeVisible(stringlamp6);
+
+
     
-  
+    stringLabelManager.addLabelsTo(*this);
+    
+    leftFish = juce::ImageCache::getFromMemory(BinaryData::LeftFish_png, BinaryData::LeftFish_pngSize);
+    rightFish = juce::ImageCache::getFromMemory(BinaryData::RightFish_png, BinaryData::RightFish_pngSize);
+    sonne = juce::ImageCache::getFromMemory(BinaryData::Sonne_png, BinaryData::Sonne_pngSize);
+    
+
+    
+    
 }
 
 MainComponent::~MainComponent()
 {
     
     shutdownAudio(); // Shut down audio
+    tuningSelector.setLookAndFeel(nullptr);
+    
+
 }
 
 //==============================================================================
@@ -81,12 +125,11 @@ void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRat
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
 {
-//    bufferSize = bufferToFill.numbers; 
-//    std::cout << bufferSize << std::endl;
-        if (bufferToFill.buffer->getNumChannels()>0)
+    
+    if (bufferToFill.buffer->getNumChannels()>0)
     {
         auto *channelData = bufferToFill.buffer->getReadPointer(0, bufferToFill.startSample);
-        for (auto i = 0; i < bufferToFill.numSamples; ++i)
+        for (auto i = 0; i < bufferToFill.numSamples; ++i) // bufferToFill.numSamples = 512 samples
             pushNextSampleIntoFifo(channelData[i]);
             //differenceFunction(channelData[i]);
     }
@@ -94,22 +137,22 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
 
 void MainComponent::pushNextSampleIntoFifo (float sample) noexcept
 {
-    if (fifoIndex == fftSize)
+    if (fifoIndex == fftSize) 
     {
         if (!nextFFTBlockReady)
         {
             juce::zeromem(fftData, sizeof(fftData));
-            // When fifoIndex and fftData reaches the end of block, make sure the previous fft data is replaced with 0s
+
             memcpy(fftData, fifo, sizeof(fifo));
-            // Copy fifo data to fftData
+
             nextFFTBlockReady = true;
-            // Flag set to true to start filling up the next block
+
         }
-        fifoIndex = 0; // fifoIndex reset back to 0
+        fifoIndex = 0; 
     }
-    fifo[fifoIndex++] = sample;
+    fifo[fifoIndex++] = sample; 
     
-    if (yinIndex == fftSize)
+    if (yinIndex == fftSize) 
     {
         if (!YinBuffReady)
         {
@@ -128,98 +171,75 @@ void MainComponent::pushNextSampleIntoFifo (float sample) noexcept
 void MainComponent::differenceFunction()
 {
     
-    auto audio_data = yinBuffer; // pointer to the address of yinBuffer
-    int n = sizeof(yinBuffer)/sizeof(yinBuffer[0]); // 2048 (Integration window size of 2048 samples)
-    auto lagRangeMax = std::min(tau_max, n); // Picks tau_max (537 samples of lag)
+    auto audio_data = yinBuffer;
+    int n = sizeof(yinBuffer)/sizeof(yinBuffer[0]); 
+    auto lagRangeMax = std::min(tau_max, n); 
     
 
     std::vector<float> audio_cumsum;
     float sum = 0.0f;
-    for (auto i = 0; i < n ; ++i) // Difference equation cycle between first index and 2048
+    for (auto i = 0; i < n ; ++i) 
     {
-        sum += audio_data[i] * audio_data[i]; // Calculate sum for each index
-        audio_cumsum.push_back(sum); // Sum them up
+        sum += audio_data[i] * audio_data[i]; 
+        audio_cumsum.push_back(sum); 
     }
-    audio_cumsum.insert(audio_cumsum.begin(), 0.0f); // Once it reaches 2048 samples, make sure the array starts with 0
+    audio_cumsum.insert(audio_cumsum.begin(), 0.0f); 
     
-    
-    int size = lagRangeMax + n; // 2585 samples
 
     
     
-    int p2 = 0;
-    int value = size/32; // 80 bits used to represent the size at the power of 2
-    std::cout << "Size: " << size << std::endl;
-    while (value > 0)
-    {
-        value >>= 1;  // shift right by 1 bit (divide value/2^1) for each cycle; Goes from 80, 40, 20, 10, 5, 2, 1, 0)
-        ++p2; // p2 = 1, 2,3, 4, 5, 6, 7
-    }
+    int size = lagRangeMax + n; 
+    int size_pad = juce::nextPowerOfTwo(size); 
     
-    // p2 is 7
-    
-    std::vector<int> nice_numbers = {16, 18, 20, 24, 25, 27, 30, 32};
-    int size_pad = std::numeric_limits<int>::max(); // Set to max?? 2147483647
 
-    // When SR is 44100
-    for (int k : nice_numbers)
-    {
-        int candidate = k * (1 << p2); // Starts at 2048, 2304, 2560, 3072 (44100)
-        
-        if (candidate >= size && candidate < size_pad) //  2048 is not greater than or equal to 2585 AND 2048 < size pad (max)
-            size_pad = candidate; // Sets size pad to 3072; The loop quits once k reaches 32
-        
-    }
     
+    juce::dsp::FFT fft(log2(size_pad));  
     
-    
-    
-    // size_pad after the loop is set to 3072 (SR: 44100)
-    
-    juce::dsp::FFT fft(log2(size_pad));  // An FFT object is created with the size of 12 (skips 11.58, because it accepts only integers)
-   
  
 
-    std::vector<float> fftBuffer(size_pad * 2, 0.0f); //fftBuffer of 6144, zeropadded
+    std::vector<float> fftBuffer(size_pad * 2, 0.0f); 
+
 
     std::copy(audio_data, audio_data + n, fftBuffer.begin());
-    //copy all the elements between audio_data and the last value of audio data into fftBuffer
+    
+    
 
     // Do FFT in-place:
     fft.performRealOnlyForwardTransform(fftBuffer.data());
+
     
     
     
     // 1) Compute power spectrum:
-    for (int k = 0; k < size_pad / 2 + 1; ++k) //For every index in size_pad/2 + 1
+    for (int k = 0; k < size_pad / 2 + 1; ++k) 
     {
-        float re = fftBuffer[2 * k]; // Real value at every bin
-        float im = fftBuffer[2 * k + 1]; // Imaginary value at every bin
-        fftBuffer[2 * k] = re * re + im * im;  // magnitude squared
-        fftBuffer[2 * k + 1] = 0.0f;           // imag part = 0 for power (not needed for YIN, set to 0 before IFFT)
+        float re = fftBuffer[2 * k]; 
+        float im = fftBuffer[2 * k + 1]; 
+        fftBuffer[2 * k] = re * re + im * im;  
+        fftBuffer[2 * k + 1] = 0.0f;           
     }
     
     // fftBuffer now contains interleaved data of re and im parts. eg: [1, 0, 2, 0....]
 
    
     fft.performRealOnlyInverseTransform(fftBuffer.data()); // perform IFFT on the fft power spectrum
+    // real values stored in first half [0....4095] (4096th element is the tau_max)
 
     
     
     std::vector<float> conv(fftBuffer.begin(), fftBuffer.begin() + lagRangeMax);
-    // Initialize conv with the values of fftBuffer from beginning to 6144+537 samples)
+    // Initialize conv with the values of fftBuffer from beginning to end
     
-    std::vector<float> dfResult(lagRangeMax); //dfResult = 537 samples
-
+    std::vector<float> dfResult(lagRangeMax);
     for (int tau = 0; tau < lagRangeMax; ++tau) // Start with 0 lag with tau being less than max lag (547 samples)
     {
         // Refer to eq 7 from the paper
         float term1 = audio_cumsum[n] - audio_cumsum[tau]; // energy term1 (r_t)
         float term2 = audio_cumsum[n] - audio_cumsum[n - tau]; // energy term2 (t_t+tau)
-        dfResult[tau] = term1 + term2 - 2.0f * conv[tau]; // Equation 7
+        dfResult[tau] = term1 + term2 - 2.0f * conv[tau];
     }
     
-    size_t df_size = dfResult.size(); // 537 different values for each lag
+    size_t df_size = dfResult.size(); 
     
     cmndf = cumulativeMeanNormalizedDifferenceEquation(dfResult, df_size);
 
@@ -238,96 +258,124 @@ std::vector<float> MainComponent::cumulativeMeanNormalizedDifferenceEquation(con
         cmndf[tau] = differenceFunction[tau] * tau / cumulativeSum; // ALWAYS multiply formulas first because of floating point precision
     
     }
-    //std::cout << "CMNDF: " << cmndf[133] << std::endl;
-    return cmndf; // 537 total values in cmndf
+
+    return cmndf; 
 }
 
 void MainComponent::getPitch()
 {
-    // Reset all lamps
-    stringlamp1.setLampState(false);
-    stringlamp2.setLampState(false);
-    stringlamp3.setLampState(false);
-    stringlamp4.setLampState(false);
-    stringlamp5.setLampState(false);
-    stringlamp6.setLampState(false);
-    if (cmndf.empty()) return;
-    if (selectedTuningArray == nullptr) return;
-    
-    float threshold = 0.1f;
-    size_t tau = tau_min;
-    
-    while (tau < cmndf.size())
-    {
-        if (cmndf[tau] < threshold)
-        {
-            while (tau + 1 < cmndf.size() && cmndf[tau + 1] < cmndf[tau]) // if 134 < 537 and cmndf[134] < cmndf[133]
-                ++tau;
-            
-            float f0 = currentSampleRate / static_cast<float>(tau);
-            
-            
-            if (f0 < f0_min || f0 > f0_max)
-                currentF0 = -1.0f;
-            else
-                currentF0 = f0;
-            
-            break;
-        }
-        ++tau;
-    }
-    
 
-    // Now light up the one closest to currentF0
-    for (int i = 0; i < 6; ++i)
+
+    // Reset all string labels' appearance
+    stringLabelManager.resetAllLabels();
+
+
+    if (cmndf.empty() || selectedTuningArray == nullptr)
+        return;
+
+    constexpr float threshold = 0.1f;
+    constexpr float matchToleranceHz = 30.0f;
+
+    float bestF0 = -1.0f;
+    float bestCMNDF = 1.0f;
+    size_t bestTau = 0;
+
+    
+    for (size_t tau = tau_min; tau < cmndf.size(); ++tau)
     {
-        float diff_f0 = std::abs(selectedTuningArray[i] - currentF0);
-        if (diff_f0 <= 2.0f)
+        float value = cmndf[tau];
+        if (value < threshold && value < bestCMNDF)
         {
-            switch (i)
+            float f0 = currentSampleRate / static_cast<float>(tau);
+
+       
+            for (int i = 0; i < 6; ++i)
             {
-                case 0: stringlamp1.setLampState(true); break;
-                case 1: stringlamp2.setLampState(true); break;
-                case 2: stringlamp3.setLampState(true); break;
-                case 3: stringlamp4.setLampState(true); break;
-                case 4: stringlamp5.setLampState(true); break;
-                case 5: stringlamp6.setLampState(true); break;
+                if (std::abs(f0 - selectedTuningArray[i]) < matchToleranceHz)
+                {
+                    bestCMNDF = value;
+                    bestF0 = f0;
+                    bestTau = tau;
+                    break;
+                }
             }
         }
     }
 
 
-    
+    if (bestF0 > 0.0f)
+    {
+        juce::int64 now = juce::Time::getMillisecondCounter();
+        const int updateIntervalMs = 100;
 
-    DBG("Detected F0: " << currentF0); // Optional debug log
+        if (now - lastPitchUpdateTime > updateIntervalMs)
+        {
+            lastPitchUpdateTime = now;
+
+            const float smoothingFactor = 0.9f;
+            if (currentF0 < 0.0f)
+                currentF0 = bestF0; 
+            else
+                currentF0 = (1.0f - smoothingFactor) * bestF0 + smoothingFactor * currentF0;
+        }
+
+
+        int closestStringIndex = -1;
+        float minDiff = std::numeric_limits<float>::max();
+
+        for (int i = 0; i < 6; ++i)
+        {
+            float diff = std::abs(selectedTuningArray[i] - currentF0);
+            if (diff < minDiff)
+            {
+                minDiff = diff;
+                closestStringIndex = i;
+            }
+        }
+
+        if (closestStringIndex != -1)
+        {
+            float idealFreq = selectedTuningArray[closestStringIndex];
+            float minFreq = idealFreq - 50.0f;
+            float maxFreq = idealFreq + 50.0f;
+            fspec.setIdealFrequency(idealFreq, minFreq, maxFreq);
+
+            stringLabelManager.updateLabelHighlight(closestStringIndex, minDiff <= 1.0f);
+        }
+    }
+    else
+    {
+        currentF0 = -1.0f; 
+    }
+
 }
 
 
 
 // -------------------------------------------------------------------------------------------
-void MainComponent::drawNextFrameOfSpectrum() // Maps 2048 fft bins to 512 points of scopedata
+void MainComponent::drawNextFrameOfSpectrum() 
 {
-    // first apply a windowing function to our data
-    window.multiplyWithWindowingTable (fftData, fftSize); // [1]
-    // then render our FFT data..
-    forwardFFT.performFrequencyOnlyForwardTransform (fftData); // [2]
-    auto mindB = -30.0f;
+    
+    window.multiplyWithWindowingTable (fftData, fftSize);
+
+    forwardFFT.performFrequencyOnlyForwardTransform (fftData);
+    auto mindB = -55.0f;
     auto maxdB = 0.0f;
-    for (int i = 0; i < scopeSize; ++i) // [3]
+    for (int i = 0; i < scopeSize; ++i) 
     {
-        auto skewedProportionX = 1.0f - std::exp (std::log (1.0f - (float) i / (float) scopeSize) * 0.2f); // To skew the x=axos to logarithmic scale
+        auto skewedProportionX = 1.0f - std::exp (std::log (1.0f - (float) i / (float) scopeSize) * 0.2f); 
         auto fftDataIndex = juce::jlimit (0, fftSize / 2, (int) (skewedProportionX * (float) fftSize * 0.5f));
         auto level = juce::jmap (juce::jlimit (mindB, maxdB, juce::Decibels::gainToDecibels (fftData[fftDataIndex]) - juce::Decibels::gainToDecibels ((float) fftSize)),
             mindB,
             maxdB,
             0.0f,
             1.0f);
-        scopeData[i] = level; // Passed onto FreqSpectrum
+        scopeData[i] = level; 
     }
     
 }
 
-void MainComponent::timerCallback() 
+void MainComponent::timerCallback()
 {
     if (nextFFTBlockReady)
      {
@@ -348,7 +396,7 @@ void MainComponent::timerCallback()
 
          rms = std::sqrt(rms / (float)fftSize);
 
-         const float volumeThreshold = 0.005f; // Try tuning between 0.005f - 0.02f depending on mic sensitivity
+         const float volumeThreshold = 0.02f; // 0.01f works best
 
          if (rms > volumeThreshold)
          {
@@ -357,7 +405,7 @@ void MainComponent::timerCallback()
          }
          else
          {
-             currentF0 = -1.0f; // Invalidate pitch when signal is too weak
+             currentF0 = -1.0f; 
          }
 
          YinBuffReady = false;
@@ -381,6 +429,7 @@ void MainComponent::drawFrame (juce::Graphics& g)
 void FreqSpectrum::setFundamentalFrequency(float freq)
 {
     fundamentalFreq = freq;
+
 }
 
 void MainComponent::releaseResources()
@@ -394,8 +443,113 @@ void MainComponent::releaseResources()
 //==============================================================================
 void MainComponent::paint (juce::Graphics& g)
 {
-    // (Our component is opaque, so we must completely fill the background with a solid colour)
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+    constexpr float kBaseWidth = 1500.0f;
+    float scale = getWidth() / kBaseWidth;
+
+    g.fillAll (juce::Colours::black);
+
+
+    addAndMakeVisible(border);
+    border.setText("Frequency Spectrum");
+    border.setColour(juce::GroupComponent::textColourId,juce::Colours::orange);
+  
+
+
+    
+
+    g.setColour(juce::Colours::orange);
+    
+    
+
+    
+    
+    
+    g.setFont(juce::FontOptions("Times New Roman", 60.0f, juce::Font::plain));
+
+    
+
+    
+
+    constexpr float relativeX = 0.167f;
+    constexpr float relativeY = 0.9f;
+    constexpr float relativeWidth = 0.666f;
+    constexpr float relativeHeight = 0.05f;
+
+    juce::Rectangle<int> bottomArea(
+        juce::roundToInt(getWidth() * relativeX),
+        juce::roundToInt(getHeight() * relativeY),
+        juce::roundToInt(getWidth() * relativeWidth),
+        juce::roundToInt(getHeight() * relativeHeight)
+    );
+
+    // Optional: scaled font size
+
+    g.setFont(juce::FontOptions("Copperplate", 60.0f * scale, juce::Font::plain));
+    
+    // COMMENTED OUT REINSTATE IF ALT METHOD WORKS
+    //    juce::String finalNoteDisplay;
+//    for (int i = 0; i < notesDisplay.length(); ++i)
+//    {
+//        finalNoteDisplay += notesDisplay[i];
+//
+//        if(i+1 < notesDisplay.length() && notesDisplay[i+1] == '#')
+//        {
+//            finalNoteDisplay += '#';
+//            ++i;
+//        }
+//
+//        else
+//        {
+//            finalNoteDisplay += "    ";
+//        }
+//      
+//    }
+
+    // Draw text
+    g.drawText(finalNoteDisplay, bottomArea, juce::Justification::horizontallyCentred, false);
+    
+
+    float x1 = 50;
+    float y1 = 300;
+    float x2 = 1100;
+    float y2 = 325;
+    float w = getWidth() * 0.20f;
+    float h = getHeight() * 0.65f;
+
+    
+
+
+    juce::AffineTransform transform1 = juce::AffineTransform::scale(
+        w / leftFish.getWidth(),
+        h / leftFish.getHeight()
+    );
+
+
+    transform1 = transform1.translated(x1, y1);
+
+
+    transform1 = transform1.rotated(juce::degreesToRadians(10.0f), x1 + w / 2.0f, y1 + h / 2.0f);
+
+
+    g.drawImageTransformed(leftFish, transform1);
+    
+    
+    
+
+    juce::AffineTransform transform2 = juce::AffineTransform::scale(
+        w / rightFish.getWidth(),
+        h / rightFish.getHeight()
+    );
+
+
+    transform2 = transform2.translated(x2, y2);
+
+
+    transform2 = transform2.rotated(juce::degreesToRadians(20.0f), x2 + w / 2.0f, y2 + h / 2.0f);
+
+    g.drawImageTransformed(rightFish, transform2);
+
+
 
 }
 
@@ -404,84 +558,83 @@ void MainComponent::resized()
     // This is called when the MainContentComponent is resized.
     // If you add any child components, this is where you should
     // update their positions.
-//    auto area = getLocalBounds().reduced(getWidth() * 0.05f);
-//
-//    auto topbar = area.removeFromTop(proportionOfHeight(0.01f));
-//    chooseTuning.setBounds(topbar.withHeight(30).withSizeKeepingCentre(getWidth()*0.9f, 30));
-//
-//    // Take next 10% for dropdown
-//    auto dropdownArea = area.removeFromTop(proportionOfHeight(0.1f));
-//    tuningSelector.setBounds(dropdownArea.withHeight(30).withSizeKeepingCentre(getWidth() * 0.5f, 30));
-//
-//    // Centered box for spectrum
-//    auto spectrumArea = area.removeFromTop(proportionOfHeight(0.6f));
-//    fspec.setBounds(spectrumArea.withSizeKeepingCentre(getWidth() * 0.6f, getHeight() * 0.5f));
+    //    auto area = getLocalBounds().reduced(getWidth() * 0.05f);
+    //
+    //    auto topbar = area.removeFromTop(proportionOfHeight(0.01f));
+    //    chooseTuning.setBounds(topbar.withHeight(30).withSizeKeepingCentre(getWidth()*0.9f, 30));
+    //
+    //    // Take next 10% for dropdown
+    //    auto dropdownArea = area.removeFromTop(proportionOfHeight(0.1f));
+    //    tuningSelector.setBounds(dropdownArea.withHeight(30).withSizeKeepingCentre(getWidth() * 0.5f, 30));
+    //
+    //    // Centered box for spectrum
+    //    auto spectrumArea = area.removeFromTop(proportionOfHeight(0.6f));
+    //    fspec.setBounds(spectrumArea.withSizeKeepingCentre(getWidth() * 0.6f, getHeight() * 0.5f));
+    
+    
+    float scaleFactor = 1.3f; // 120% of window size
+
+    int sunWidth = getWidth() * scaleFactor;
+    int sunHeight = getHeight() * scaleFactor;
+
+    
+    int sunX = (getWidth() - sunWidth) / 2 + 10;
+    int sunY = (getHeight() - sunHeight) / 2 -50 ;
+
+    glowingSonne.setBounds(sunX, sunY, sunWidth, sunHeight);
+    
+
+    constexpr float relativeX_kanji = 0.21f;
+    constexpr float relativeY_kanji = 0.13f;
+    constexpr float relativeWidth_kanji = 0.6f;
+    constexpr float relativeHeight_kanji = 0.2f;
+
+    kanjiLabel.setBounds(
+        juce::roundToInt(getWidth() * relativeX_kanji),
+        juce::roundToInt(getHeight() * relativeY_kanji),
+        juce::roundToInt(getWidth() * relativeWidth_kanji),
+        juce::roundToInt(getHeight() * relativeHeight_kanji));
+    
+
     
     chooseTuning.setBounds(
-        getWidth() * 0.45f,   // 45% from the left
-        getHeight() * 0.05f,  // 5% from the top
-        getWidth() * 0.5f,    // 50% width
-        30                    // fixed height
-    );
+                           getWidth() * 0.45f,  
+                           getHeight() * 0.40f, 
+                           getWidth() * 0.5f,    
+                           getHeight() * 0.03f                   
+                           );
     
     tuningSelector.setBounds(
-        getWidth() * 0.1875f,   // 18.75% from the left
-        getHeight() * 0.13f,    // 13% from the top
-        getWidth() * 0.625f,    // 62.5% width
-        30                      // fixed height
-    );
+                             getWidth() * 0.1875f,   
+                             getHeight() * 0.33f,   
+                             getWidth() * 0.620f,    
+                             getHeight() * 0.035f                 
+                             );
     
     fspec.setBounds(
-        getWidth() * 0.1870f,   // horizontally aligned with dropdown
-        getHeight() * 0.25f,    // starts lower to give space to label & dropdown
-        getWidth() * 0.625f,    // same width as dropdown
-        getHeight() * 0.4f      // takes 60% of height (adjust as needed)
-    );
+                    getWidth() * 0.1870f,   
+                    getHeight() * 0.40f,    
+                    getWidth() * 0.625f,    
+                    getHeight() * 0.4f      
+                    );
     
-    stringlamp1.setBounds(
-        getWidth() * 0.2370f,   // horizontally aligned with dropdown
-        getHeight() * 0.70f,    // starts lower to give space to label & dropdown
-        getWidth() * 0.05f,    // same width as dropdown
-        getHeight() * 0.05f      // takes 60% of height (adjust as needed)
-    );
-    stringlamp2.setBounds(
-        getWidth() * 0.3370f,   // horizontally aligned with dropdown
-        getHeight() * 0.70f,    // starts lower to give space to label & dropdown
-        getWidth() * 0.05f,    // same width as dropdown
-        getHeight() * 0.05f
-    );
-     stringlamp3.setBounds(
-        getWidth() * 0.4370f,   // horizontally aligned with dropdown
-        getHeight() * 0.70f,    // starts lower to give space to label & dropdown
-        getWidth() * 0.05f,    // same width as dropdown
-        getHeight() * 0.05f
-    );
-    stringlamp4.setBounds(
-       getWidth() * 0.5370f,   // horizontally aligned with dropdown
-       getHeight() * 0.70f,    // starts lower to give space to label & dropdown
-       getWidth() * 0.05f,    // same width as dropdown
-       getHeight() * 0.05f
-   );
-    stringlamp5.setBounds(
-       getWidth() * 0.6370f,   // horizontally aligned with dropdown
-       getHeight() * 0.70f,    // starts lower to give space to label & dropdown
-       getWidth() * 0.05f,    // same width as dropdown
-       getHeight() * 0.05f
-   );
-    stringlamp6.setBounds(
-       getWidth() * 0.7370f,   // horizontally aligned with dropdown
-       getHeight() * 0.70f,    // starts lower to give space to label & dropdown
-       getWidth() * 0.05f,    // same width as dropdown
-       getHeight() * 0.05f
-   );
-     
-                           
-                           
+    border.setBounds(
+                     getWidth() * 0.1860f,
+                     getHeight() * 0.389f,
+                     getWidth() * 0.625f,
+                     getHeight() * 0.420f);
     
     
-                           
-//    chooseTuning.setBounds(350, 10, 600, 30);
-//    tuningSelector.setBounds(150, 50, 500, 30);
-//    fspec.setBounds(150, 100, 500, 500);
+    float labelY = getHeight() * 0.85f;
+    float labelH = getHeight() * 0.05f;
+    float labelW = getWidth() * 0.05f;
+
+    float startX = 300.0f;
+    float spacing = 150.0f;
+
+    stringLabelManager.resizeLabels(startX, spacing, labelY, labelW, labelH);
+    
+    
 }
+
 
