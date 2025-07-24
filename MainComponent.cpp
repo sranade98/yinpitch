@@ -104,6 +104,7 @@ MainComponent::~MainComponent()
     
     shutdownAudio(); // Shut down audio
     tuningSelector.setLookAndFeel(nullptr);
+    border.setLookAndFeel(nullptr);
     
 
 }
